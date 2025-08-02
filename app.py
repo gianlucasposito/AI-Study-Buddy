@@ -355,9 +355,10 @@ else:
                           
 Ask questions and have real‑time conversations with your AI Study Helper—clarify concepts, explore examples, and dive deeper into your documents.
 
-📝 Custom Quiz Generation
+📝 Custom Quiz Generation Ciao
              
 Reinforce your understanding by automatically generating tailored quizzes. Choose your preferred format—multiple choice, true/false, or short answer—and test yourself on the topics that matter most.
 
 Let’s make learning smarter, faster, and more fun with AI Study Buddy!
+
 """)

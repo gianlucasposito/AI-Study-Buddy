@@ -26,6 +26,12 @@ from tavily import TavilyClient
 st.set_page_config(layout="wide", page_title="AI Study Buddy")
 st.title("AI Study Buddy")
 
+# Create columns for layout
+col1, col2, col3 = st.columns([1, 2, 1])
+# Display image in the center column
+with col2:
+    st.image("App_Image.png", width=400)
+
 # Initialize session state for conversation history
 if "messages" not in st.session_state:
     st.session_state.messages = []

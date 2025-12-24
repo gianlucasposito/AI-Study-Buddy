@@ -1,3 +1,4 @@
 # Ignore specific files
 Comando.txt
 Gemini_prompt.docx
+.env

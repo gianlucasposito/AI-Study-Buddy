@@ -6,4 +6,5 @@ pypdf2==3.0.1
 chromadb==0.4.22
 sentence-transformers==2.5.1
 tavily-python==0.3.0
-faiss-cpu==1.7.4 
+faiss-cpu==1.7.4
+python-dotenv==1.0.0 

@@ -1,6 +1,6 @@
 # AI Study Buddy
 
-A Streamlit application that uses Retrieval-Augmented Generation (RAG) to help you study and learn from your PDF documents.
+A Streamlit application powered by **LangChain** that uses Retrieval-Augmented Generation (RAG) to help you study and learn from your PDF documents.
 
 ## Features
 
@@ -44,12 +44,14 @@ streamlit run app.py
 
 ## How It Works
 
-1. **PDF Processing**: When you upload PDFs, the text is extracted and split into manageable chunks
-2. **Vector Database**: Text chunks are converted into embeddings and stored in a ChromaDB vector database
-3. **Retrieval**: When you ask a question, the most relevant chunks are retrieved from the database
-4. **Generation**: The AI uses the retrieved context to generate helpful, Socratic-style responses
-5. **Web Search**: If your question requires information not in your documents, the AI can search the web
-6. **Quiz Generation**: The quiz feature samples diverse content from your documents to create relevant questions
+This application leverages **LangChain** to simplify AI integration:
+
+1. **PDF Processing**: Uses LangChain's `PyPDFLoader` to extract text from uploaded documents
+2. **LLM Integration**: LangChain's `ChatOpenAI` for natural language understanding and generation
+3. **Web Search**: LangChain's `TavilySearchAPIWrapper` for seamless web search integration
+4. **Conversational AI**: Message schemas (`HumanMessage`, `SystemMessage`) for structured conversations
+5. **Generation**: The AI uses the retrieved context to generate helpful, Socratic-style responses
+6. **Quiz Generation**: Creates interactive multiple-choice quizzes from your study materials
 
 ## API Keys
 
@@ -58,4 +60,7 @@ streamlit run app.py
 
 ## Note
 
-This application is for educational purposes. The AI will always cite its sources, whether from your documents or from web searches. 
+This application is for educational purposes. The AI will always cite its sources, whether from your documents or from web searches.
+
+---
+*Powered by LangChain, OpenAI GPT-4, and Tavily Search* 

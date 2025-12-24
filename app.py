@@ -3,9 +3,10 @@ import os
 import tempfile
 import json
 from dotenv import load_dotenv
-import PyPDF2
-from openai import OpenAI
-from tavily import TavilyClient
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_openai import ChatOpenAI
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain.schema import HumanMessage, SystemMessage
 
 # Load environment variables
 load_dotenv()
@@ -57,49 +58,59 @@ def check_api_keys():
         return False
     return True
 
-# Extract text from PDFs
+# Extract text from PDFs using LangChain
 def extract_text_from_pdfs(pdf_files):
-    """Extract text from uploaded PDF files"""
+    """Extract text from uploaded PDF files using LangChain"""
     all_text = ""
     
     for pdf_file in pdf_files:
+        # Save to temporary file
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
             temp_file.write(pdf_file.read())
             temp_path = temp_file.name
         
-        with open(temp_path, "rb") as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page in pdf_reader.pages:
-                all_text += page.extract_text() + "\n"
+        # Use LangChain's PyPDFLoader
+        loader = PyPDFLoader(temp_path)
+        documents = loader.load()
+        
+        # Extract text from documents
+        for doc in documents:
+            all_text += doc.page_content + "\n"
         
         os.unlink(temp_path)
     
     return all_text
 
-# Search web using Tavily
+# Search web using LangChain's Tavily tool
 def search_web(query):
-    """Search the web using Tavily API"""
+    """Search the web using Tavily API with LangChain"""
     check_api_keys()
-    tavily = TavilyClient(api_key=TAVILY_API_KEY)
     
-    result = tavily.search(
-        query=query,
-        search_depth="advanced",
-        max_results=10
+    # Use LangChain's TavilySearchResults
+    search = TavilySearchResults(
+        max_results=10,
+        api_key=TAVILY_API_KEY
     )
+    results = search.invoke({"query": query})
     
     # Combine search results into text
     content = ""
-    for item in result.get('results', []):
+    for item in results:
         content += f"{item.get('content', '')}\n\n"
     
     return content
 
-# Generate quiz using OpenAI
+# Generate quiz using LangChain
 def generate_quiz(content, topic=""):
-    """Generate a quiz from content using OpenAI"""
+    """Generate a quiz from content using LangChain's ChatOpenAI"""
     check_api_keys()
-    client = OpenAI(api_key=OPENAI_API_KEY)
+    
+    # Initialize LangChain's ChatOpenAI
+    llm = ChatOpenAI(
+        model="gpt-4o",
+        temperature=0.2,
+        openai_api_key=OPENAI_API_KEY
+    )
     
     prompt = f"""Based on the following content, create a 5-question multiple-choice quiz.
 
@@ -122,54 +133,55 @@ Return ONLY valid JSON in this format:
 ]
 """
     
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are a quiz generator. Return only valid JSON."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.2
-    )
+    # Use LangChain's message format
+    messages = [
+        SystemMessage(content="You are a quiz generator. Return only valid JSON."),
+        HumanMessage(content=prompt)
+    ]
+    
+    response = llm.invoke(messages)
     
     try:
-        quiz_data = json.loads(response.choices[0].message.content)
+        quiz_data = json.loads(response.content)
         return quiz_data
     except:
         st.error("Failed to generate quiz. Please try again.")
         return None
 
-# Answer questions using OpenAI
+# Answer questions using LangChain
 def answer_question(question, context, chat_history):
-    """Answer a question based on context using OpenAI"""
+    """Answer a question based on context using LangChain's ChatOpenAI"""
     check_api_keys()
-    client = OpenAI(api_key=OPENAI_API_KEY)
     
-    # Build conversation history
+    # Initialize LangChain's ChatOpenAI
+    llm = ChatOpenAI(
+        model="gpt-4o",
+        temperature=0.3,
+        openai_api_key=OPENAI_API_KEY
+    )
+    
+    # Build conversation history using LangChain messages
     messages = [
-        {"role": "system", "content": """You are a helpful study tutor. Answer questions based on the provided context.
+        SystemMessage(content="""You are a helpful study tutor. Answer questions based on the provided context.
 - Be clear and concise
 - Use the Socratic method to guide understanding
 - Cite your sources when providing information
-- If you need more information, say so"""}
+- If you need more information, say so""")
     ]
     
-    # Add chat history
-    for msg in chat_history[-6:]:  # Last 3 exchanges
-        messages.append(msg)
+    # Add chat history (last 3 exchanges)
+    for msg in chat_history[-6:]:
+        if msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+        elif msg["role"] == "assistant":
+            messages.append(SystemMessage(content=msg["content"]))
     
     # Add current question with context
-    messages.append({
-        "role": "user",
-        "content": f"Context:\n{context[:4000]}\n\nQuestion: {question}"
-    })
+    messages.append(HumanMessage(content=f"Context:\n{context[:4000]}\n\nQuestion: {question}"))
     
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        temperature=0.3
-    )
+    response = llm.invoke(messages)
     
-    return response.choices[0].message.content
+    return response.content
 
 # Sidebar
 with st.sidebar:
@@ -421,5 +433,5 @@ else:
     ### 👈 Select an option from the sidebar to begin!
     
     ---
-    *Powered by OpenAI GPT-4 and Tavily Search*
+    *Powered by LangChain, OpenAI GPT-4, and Tavily Search*
     """)

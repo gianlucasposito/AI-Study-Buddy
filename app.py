@@ -3,6 +3,7 @@ import os
 import tempfile
 import json
 import uuid
+from pathlib import Path
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -12,12 +13,28 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain.schema import Document
 
-# Load environment variables
-load_dotenv()
+# Load environment variables with explicit path and override
+# Handle potential BOM issues by trying multiple encodings
+env_path = Path(__file__).parent / '.env'
+if env_path.exists():
+    # Try to load with utf-8-sig first to handle BOM
+    try:
+        with open(env_path, 'r', encoding='utf-8-sig') as f:
+            content = f.read()
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+    except:
+        pass
 
-# Initialize API clients
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+load_dotenv(dotenv_path=env_path, override=True)
+
+# Initialize API clients with fallback to Streamlit secrets
+try:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY") or st.secrets.get("TAVILY_API_KEY", None)
+except:
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 # Set page configuration
 st.set_page_config(layout="wide", page_title="AI Study Buddy")
@@ -152,15 +169,28 @@ def generate_quiz(vector_store, topic=""):
     check_api_keys()
     
     # Retrieve relevant documents from vector store
-    if topic:
-        # Search for topic-specific content
-        relevant_docs = vector_store.similarity_search(topic, k=10)
-    else:
-        # Get diverse content from the store
-        relevant_docs = vector_store.similarity_search("", k=10)
+    try:
+        if topic:
+            # Search for topic-specific content
+            relevant_docs = vector_store.similarity_search(topic, k=10)
+        else:
+            # Get diverse content from the store - use a general query
+            relevant_docs = vector_store.similarity_search("main concepts and key information", k=10)
+        
+        if not relevant_docs:
+            st.error("❌ No documents found in vector store. Please try uploading documents again.")
+            return None
+            
+    except Exception as e:
+        st.error(f"❌ Error retrieving documents from vector store: {str(e)}")
+        return None
     
     # Combine retrieved content
     content = "\n\n".join([doc.page_content for doc in relevant_docs])
+    
+    if not content or len(content.strip()) < 50:
+        st.error("❌ Not enough content to generate a quiz. Please upload more detailed documents.")
+        return None
     
     # Initialize LangChain's ChatOpenAI
     llm = ChatOpenAI(
@@ -174,8 +204,10 @@ def generate_quiz(vector_store, topic=""):
 Content:
 {content[:8000]}
 
+IMPORTANT: Return ONLY a valid JSON array. Do not include any explanations, markdown, or other text.
+
 Generate exactly 5 questions with 4 options each (A, B, C, D).
-Return ONLY valid JSON in this format:
+The JSON format MUST be:
 [
   {{
     "question": "Question text here?",
@@ -188,6 +220,8 @@ Return ONLY valid JSON in this format:
     "answer": "A"
   }}
 ]
+
+Start your response with [ and end with ]. No other text before or after.
 """
     
     # Use LangChain's message format
@@ -196,13 +230,33 @@ Return ONLY valid JSON in this format:
         HumanMessage(content=prompt)
     ]
     
-    response = llm.invoke(messages)
-    
     try:
-        quiz_data = json.loads(response.content)
+        response = llm.invoke(messages)
+        
+        # Clean response content - remove markdown code blocks if present
+        content = response.content.strip()
+        if content.startswith("```"):
+            # Remove markdown code blocks
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+            content = content.strip()
+        
+        quiz_data = json.loads(content)
+        
+        # Validate the quiz data structure
+        if not isinstance(quiz_data, list) or len(quiz_data) == 0:
+            raise ValueError("Quiz data must be a non-empty list")
+        
         return quiz_data
-    except:
-        st.error("Failed to generate quiz. Please try again.")
+        
+    except json.JSONDecodeError as e:
+        st.error(f"❌ Failed to parse quiz JSON: {str(e)}")
+        st.error(f"LLM Response: {response.content[:500]}...")
+        return None
+    except Exception as e:
+        st.error(f"❌ Error generating quiz: {str(e)}")
+        st.exception(e)
         return None
 
 # Answer questions using LangChain with vector retrieval

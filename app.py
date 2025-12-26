@@ -2,11 +2,15 @@ import streamlit as st
 import os
 import tempfile
 import json
+import uuid
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain.schema import HumanMessage, SystemMessage
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain.schema import Document
 
 # Load environment variables
 load_dotenv()
@@ -46,8 +50,12 @@ if "quiz_topic" not in st.session_state:
 if "content_source" not in st.session_state:
     st.session_state.content_source = "topic"
 
-if "document_text" not in st.session_state:
-    st.session_state.document_text = ""
+# ChromaDB vector store instead of plain text
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
+
+if "collection_id" not in st.session_state:
+    st.session_state.collection_id = None
 
 # Check API keys
 def check_api_keys():
@@ -58,10 +66,47 @@ def check_api_keys():
         return False
     return True
 
-# Extract text from PDFs using LangChain
-def extract_text_from_pdfs(pdf_files):
-    """Extract text from uploaded PDF files using LangChain"""
-    all_text = ""
+# Initialize FAISS vector store
+def create_vector_store(documents, collection_name=None):
+    """Create a FAISS vector store from documents"""
+    check_api_keys()
+    
+    # Generate unique collection name if not provided
+    if collection_name is None:
+        collection_name = f"collection_{uuid.uuid4().hex[:8]}"
+    
+    # Initialize embeddings
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    
+    # Create text splitter for chunking
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+        separators=["\n\n", "\n", " ", ""]
+    )
+    
+    # Split documents into chunks
+    if isinstance(documents, str):
+        # Convert string to Document objects
+        chunks = text_splitter.split_text(documents)
+        docs = [Document(page_content=chunk, metadata={"source": "text"}) for chunk in chunks]
+    else:
+        # Already Document objects from PDF loader
+        docs = text_splitter.split_documents(documents)
+    
+    # Create FAISS vector store
+    vector_store = FAISS.from_documents(
+        documents=docs,
+        embedding=embeddings
+    )
+    
+    return vector_store, collection_name
+
+# Extract documents from PDFs using LangChain
+def extract_documents_from_pdfs(pdf_files):
+    """Extract documents from uploaded PDF files using LangChain"""
+    all_documents = []
     
     for pdf_file in pdf_files:
         # Save to temporary file
@@ -73,13 +118,14 @@ def extract_text_from_pdfs(pdf_files):
         loader = PyPDFLoader(temp_path)
         documents = loader.load()
         
-        # Extract text from documents
+        # Add metadata
         for doc in documents:
-            all_text += doc.page_content + "\n"
+            doc.metadata["source"] = pdf_file.name
         
+        all_documents.extend(documents)
         os.unlink(temp_path)
     
-    return all_text
+    return all_documents
 
 # Search web using LangChain's Tavily tool
 def search_web(query):
@@ -100,10 +146,21 @@ def search_web(query):
     
     return content
 
-# Generate quiz using LangChain
-def generate_quiz(content, topic=""):
-    """Generate a quiz from content using LangChain's ChatOpenAI"""
+# Generate quiz using LangChain with vector store
+def generate_quiz(vector_store, topic=""):
+    """Generate a quiz from vector store using LangChain's ChatOpenAI"""
     check_api_keys()
+    
+    # Retrieve relevant documents from vector store
+    if topic:
+        # Search for topic-specific content
+        relevant_docs = vector_store.similarity_search(topic, k=10)
+    else:
+        # Get diverse content from the store
+        relevant_docs = vector_store.similarity_search("", k=10)
+    
+    # Combine retrieved content
+    content = "\n\n".join([doc.page_content for doc in relevant_docs])
     
     # Initialize LangChain's ChatOpenAI
     llm = ChatOpenAI(
@@ -148,10 +205,19 @@ Return ONLY valid JSON in this format:
         st.error("Failed to generate quiz. Please try again.")
         return None
 
-# Answer questions using LangChain
-def answer_question(question, context, chat_history):
-    """Answer a question based on context using LangChain's ChatOpenAI"""
+# Answer questions using LangChain with vector retrieval
+def answer_question(question, vector_store, chat_history):
+    """Answer a question using semantic search from vector store"""
     check_api_keys()
+    
+    # Retrieve relevant documents using similarity search
+    relevant_docs = vector_store.similarity_search(question, k=5)
+    
+    # Combine retrieved content
+    context = "\n\n".join([
+        f"[Source: {doc.metadata.get('source', 'unknown')}]\n{doc.page_content}" 
+        for doc in relevant_docs
+    ])
     
     # Initialize LangChain's ChatOpenAI
     llm = ChatOpenAI(
@@ -176,8 +242,8 @@ def answer_question(question, context, chat_history):
         elif msg["role"] == "assistant":
             messages.append(SystemMessage(content=msg["content"]))
     
-    # Add current question with context
-    messages.append(HumanMessage(content=f"Context:\n{context[:4000]}\n\nQuestion: {question}"))
+    # Add current question with retrieved context
+    messages.append(HumanMessage(content=f"Context:\n{context}\n\nQuestion: {question}"))
     
     response = llm.invoke(messages)
     
@@ -215,6 +281,8 @@ with st.sidebar:
                 if quiz_topic:
                     st.session_state.quiz_active = False
                     st.session_state.messages = []  # Reset chat for new topic
+                    st.session_state.vector_store = None  # Clear vector store
+                    st.session_state.collection_id = None
                     st.rerun()
                 else:
                     st.warning("Please enter a topic!")
@@ -226,6 +294,8 @@ with st.sidebar:
                     st.session_state.quiz_submitted = False
                     st.session_state.quiz_answers = {}
                     st.session_state.quiz_data = None
+                    st.session_state.vector_store = None  # Clear vector store for new quiz
+                    st.session_state.collection_id = None
                 else:
                     st.warning("Please enter a topic!")
     else:
@@ -246,6 +316,8 @@ with st.sidebar:
                 if st.button("💬 Ask Questions", use_container_width=True, key="doc_chat"):
                     st.session_state.quiz_active = False
                     st.session_state.messages = []  # Reset chat for new documents
+                    st.session_state.vector_store = None  # Clear vector store
+                    st.session_state.collection_id = None
                     st.rerun()
             
             with col2:
@@ -254,6 +326,8 @@ with st.sidebar:
                     st.session_state.quiz_submitted = False
                     st.session_state.quiz_answers = {}
                     st.session_state.quiz_data = None
+                    st.session_state.vector_store = None  # Clear vector store for new quiz
+                    st.session_state.collection_id = None
 
 # Main content
 if st.session_state.quiz_active:
@@ -263,13 +337,15 @@ if st.session_state.quiz_active:
             if st.session_state.content_source == "topic" and st.session_state.quiz_topic:
                 # Search web for topic
                 content = search_web(st.session_state.quiz_topic)
-                st.session_state.document_text = content
-                st.session_state.quiz_data = generate_quiz(content, st.session_state.quiz_topic)
+                # Create vector store from web content
+                st.session_state.vector_store, st.session_state.collection_id = create_vector_store(content)
+                st.session_state.quiz_data = generate_quiz(st.session_state.vector_store, st.session_state.quiz_topic)
             elif st.session_state.content_source == "documents" and uploaded_files:
-                # Extract text from PDFs
-                content = extract_text_from_pdfs(uploaded_files)
-                st.session_state.document_text = content
-                st.session_state.quiz_data = generate_quiz(content)
+                # Extract documents from PDFs
+                documents = extract_documents_from_pdfs(uploaded_files)
+                # Create vector store from documents
+                st.session_state.vector_store, st.session_state.collection_id = create_vector_store(documents)
+                st.session_state.quiz_data = generate_quiz(st.session_state.vector_store)
     
     if st.session_state.quiz_data:
         # Display source
@@ -345,13 +421,16 @@ if st.session_state.quiz_active:
                     st.session_state.quiz_data = None
                     st.session_state.quiz_submitted = False
                     st.session_state.quiz_answers = {}
+                    st.session_state.vector_store = None  # Clear vector store
+                    st.session_state.collection_id = None
                     st.rerun()
 
 elif st.session_state.content_source == "documents" and uploaded_files:
     # Chat interface for documents
-    if not st.session_state.document_text:
-        with st.spinner("📄 Processing documents..."):
-            st.session_state.document_text = extract_text_from_pdfs(uploaded_files)
+    if not st.session_state.vector_store:
+        with st.spinner("📄 Processing documents and creating embeddings..."):
+            documents = extract_documents_from_pdfs(uploaded_files)
+            st.session_state.vector_store, st.session_state.collection_id = create_vector_store(documents)
     
     st.header("💬 Study Helper Chat")
     st.markdown(f"*Ask questions about your {len(uploaded_files)} uploaded document(s)*")
@@ -373,12 +452,12 @@ elif st.session_state.content_source == "documents" and uploaded_files:
         with st.chat_message("user"):
             st.write(user_input)
         
-        # Get AI response
+        # Get AI response with semantic retrieval
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 response = answer_question(
                     user_input,
-                    st.session_state.document_text,
+                    st.session_state.vector_store,
                     st.session_state.messages
                 )
                 st.write(response)
@@ -408,16 +487,30 @@ elif st.session_state.content_source == "topic" and st.session_state.quiz_topic:
         with st.chat_message("user"):
             st.write(user_input)
         
-        # Search web for context if needed
+        # Search web and create/update vector store
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                # Get fresh context from web
+            with st.spinner("Searching and thinking..."):
+                # Get fresh context from web for this question
                 search_query = f"{st.session_state.quiz_topic} {user_input}"
                 context = search_web(search_query)
                 
+                # Create or update vector store with new context
+                if not st.session_state.vector_store:
+                    st.session_state.vector_store, st.session_state.collection_id = create_vector_store(context)
+                else:
+                    # Add new context to existing store
+                    text_splitter = RecursiveCharacterTextSplitter(
+                        chunk_size=1000,
+                        chunk_overlap=200,
+                        length_function=len
+                    )
+                    chunks = text_splitter.split_text(context)
+                    docs = [Document(page_content=chunk, metadata={"source": "web_search"}) for chunk in chunks]
+                    st.session_state.vector_store.add_documents(docs)
+                
                 response = answer_question(
                     user_input,
-                    context,
+                    st.session_state.vector_store,
                     st.session_state.messages
                 )
                 st.write(response)

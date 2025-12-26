@@ -207,14 +207,27 @@ with st.sidebar:
         st.session_state.quiz_topic = quiz_topic
         uploaded_files = None
         
-        if st.button("🎯 Create Quiz", use_container_width=True):
-            if quiz_topic:
-                st.session_state.quiz_active = True
-                st.session_state.quiz_submitted = False
-                st.session_state.quiz_answers = {}
-                st.session_state.quiz_data = None
-            else:
-                st.warning("Please enter a topic!")
+        st.markdown("**Choose an action:**")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("💬 Ask Questions", use_container_width=True):
+                if quiz_topic:
+                    st.session_state.quiz_active = False
+                    st.session_state.messages = []  # Reset chat for new topic
+                    st.rerun()
+                else:
+                    st.warning("Please enter a topic!")
+        
+        with col2:
+            if st.button("🎯 Create Quiz", use_container_width=True):
+                if quiz_topic:
+                    st.session_state.quiz_active = True
+                    st.session_state.quiz_submitted = False
+                    st.session_state.quiz_answers = {}
+                    st.session_state.quiz_data = None
+                else:
+                    st.warning("Please enter a topic!")
     else:
         st.subheader("📄 Upload Documents")
         uploaded_files = st.file_uploader(
@@ -225,11 +238,22 @@ with st.sidebar:
         )
         st.session_state.quiz_topic = ""
         
-        if uploaded_files and st.button("📝 Create Quiz", use_container_width=True):
-            st.session_state.quiz_active = True
-            st.session_state.quiz_submitted = False
-            st.session_state.quiz_answers = {}
-            st.session_state.quiz_data = None
+        if uploaded_files:
+            st.markdown("**Choose an action:**")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("💬 Ask Questions", use_container_width=True, key="doc_chat"):
+                    st.session_state.quiz_active = False
+                    st.session_state.messages = []  # Reset chat for new documents
+                    st.rerun()
+            
+            with col2:
+                if st.button("📝 Create Quiz", use_container_width=True, key="doc_quiz"):
+                    st.session_state.quiz_active = True
+                    st.session_state.quiz_submitted = False
+                    st.session_state.quiz_answers = {}
+                    st.session_state.quiz_data = None
 
 # Main content
 if st.session_state.quiz_active:

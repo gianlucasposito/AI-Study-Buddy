@@ -108,8 +108,20 @@ def create_vector_store(documents, collection_name=None):
         # Convert string to Document objects
         chunks = text_splitter.split_text(documents)
         docs = [Document(page_content=chunk, metadata={"source": "text"}) for chunk in chunks]
+    elif isinstance(documents, list) and len(documents) > 0 and isinstance(documents[0], Document):
+        # Already Document objects - check if they have web search metadata
+        if documents[0].metadata.get('source', '').startswith('http'):
+            # Web search results with URLs - preserve URL metadata during splitting
+            docs = []
+            for doc in documents:
+                chunks = text_splitter.split_text(doc.page_content)
+                for chunk in chunks:
+                    docs.append(Document(page_content=chunk, metadata=doc.metadata.copy()))
+        else:
+            # PDF documents or other - use standard splitting
+            docs = text_splitter.split_documents(documents)
     else:
-        # Already Document objects from PDF loader
+        # Fallback
         docs = text_splitter.split_documents(documents)
     
     # Create FAISS vector store
@@ -156,12 +168,19 @@ def search_web(query):
     )
     results = search.invoke({"query": query})
     
-    # Combine search results into text
-    content = ""
+    # Create Document objects with URL metadata
+    documents = []
     for item in results:
-        content += f"{item.get('content', '')}\n\n"
+        doc = Document(
+            page_content=item.get('content', ''),
+            metadata={
+                'source': item.get('url', 'Unknown URL'),
+                'title': item.get('title', 'No title')
+            }
+        )
+        documents.append(doc)
     
-    return content
+    return documents
 
 # Generate quiz using LangChain with vector store
 def generate_quiz(vector_store, topic=""):
@@ -285,7 +304,8 @@ def answer_question(question, vector_store, chat_history):
         SystemMessage(content="""You are a helpful study tutor. Answer questions based on the provided context.
 - Be clear and concise
 - Use the Socratic method to guide understanding
-- Cite your sources when providing information
+- IMPORTANT: Always include the source URL(s) at the end of your answer
+- Format sources as: "Sources: [URL1], [URL2], etc."
 - If you need more information, say so""")
     ]
     
@@ -390,9 +410,9 @@ if st.session_state.quiz_active:
         with st.spinner("🔍 Generating your quiz..."):
             if st.session_state.content_source == "topic" and st.session_state.quiz_topic:
                 # Search web for topic
-                content = search_web(st.session_state.quiz_topic)
+                documents = search_web(st.session_state.quiz_topic)
                 # Create vector store from web content
-                st.session_state.vector_store, st.session_state.collection_id = create_vector_store(content)
+                st.session_state.vector_store, st.session_state.collection_id = create_vector_store(documents)
                 st.session_state.quiz_data = generate_quiz(st.session_state.vector_store, st.session_state.quiz_topic)
             elif st.session_state.content_source == "documents" and uploaded_files:
                 # Extract documents from PDFs
@@ -546,11 +566,11 @@ elif st.session_state.content_source == "topic" and st.session_state.quiz_topic:
             with st.spinner("Searching and thinking..."):
                 # Get fresh context from web for this question
                 search_query = f"{st.session_state.quiz_topic} {user_input}"
-                context = search_web(search_query)
+                search_docs = search_web(search_query)
                 
                 # Create or update vector store with new context
                 if not st.session_state.vector_store:
-                    st.session_state.vector_store, st.session_state.collection_id = create_vector_store(context)
+                    st.session_state.vector_store, st.session_state.collection_id = create_vector_store(search_docs)
                 else:
                     # Add new context to existing store
                     text_splitter = RecursiveCharacterTextSplitter(
@@ -558,8 +578,12 @@ elif st.session_state.content_source == "topic" and st.session_state.quiz_topic:
                         chunk_overlap=200,
                         length_function=len
                     )
-                    chunks = text_splitter.split_text(context)
-                    docs = [Document(page_content=chunk, metadata={"source": "web_search"}) for chunk in chunks]
+                    # Split search documents while preserving URL metadata
+                    docs = []
+                    for doc in search_docs:
+                        chunks = text_splitter.split_text(doc.page_content)
+                        for chunk in chunks:
+                            docs.append(Document(page_content=chunk, metadata=doc.metadata.copy()))
                     st.session_state.vector_store.add_documents(docs)
                 
                 response = answer_question(

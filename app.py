@@ -577,15 +577,11 @@ else:
     st.markdown("""
     ## Welcome to **AI Study Buddy**! 🎓
     
-    Your AI-powered learning companion that makes studying simple and effective.
-    
-    ### 🚀 Getting Started
-    
-    Choose how you want to learn:
+    Your AI-powered learning tutor that makes studying simple and effective.
     
     #### 🔍 **Search a Topic**
     - Enter any topic you want to learn about
-    - We'll search the internet for information
+    - Get a clear summary by web search with cited sources
     - Generate a quiz to test your knowledge
     - Chat with AI about the topic
     
@@ -594,15 +590,6 @@ else:
     - Chat with AI about your documents
     - Generate custom quizzes from your materials
     
-    ### ✨ Features
-    
-    - **🤖 AI Tutor**: Ask questions and get helpful answers
-    - **📝 Smart Quizzes**: Auto-generated multiple-choice questions
-    - **🌐 Web Search**: Internet search for comprehensive learning
-    - **💡 Simple & Fast**: Clean interface, direct API calls
-    
     ### 👈 Select an option from the sidebar to begin!
     
-    ---
-    *Powered by LangChain, OpenAI GPT-4, and Tavily Search*
     """)

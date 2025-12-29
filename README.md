@@ -2,7 +2,7 @@
 
 A Streamlit application powered by **LangChain** that uses Retrieval-Augmented Generation (RAG) with FAISS vector database to help you study and learn from multiple sources.
 
-![AI Study Buddy App Design](App_Image.png)
+![AI Study Buddy App Design](App_design.jpg)
 
 ## Features
 

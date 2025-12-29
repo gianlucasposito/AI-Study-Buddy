@@ -67,7 +67,7 @@ if "quiz_topic" not in st.session_state:
 if "content_source" not in st.session_state:
     st.session_state.content_source = "topic"
 
-# ChromaDB vector store instead of plain text
+# FAISS vector store for semantic search
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 
@@ -98,7 +98,7 @@ def create_vector_store(documents, collection_name=None):
     # Create text splitter for chunking
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
-        chunk_overlap=200,
+        chunk_overlap=150,
         length_function=len,
         separators=["\n\n", "\n", " ", ""]
     )
@@ -575,7 +575,7 @@ elif st.session_state.content_source == "topic" and st.session_state.quiz_topic:
                     # Add new context to existing store
                     text_splitter = RecursiveCharacterTextSplitter(
                         chunk_size=1000,
-                        chunk_overlap=200,
+                        chunk_overlap=150,
                         length_function=len
                     )
                     # Split search documents while preserving URL metadata
